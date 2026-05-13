@@ -841,7 +841,7 @@ canvas {
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar">
     <div class="logo">
-        <a href="dashboard.php">
+        <a href="Dashboard.php">
             <img src="image/DENR.jpg" alt="DENR Logo">
         </a>
         <div class="sidebar-title">
@@ -850,9 +850,9 @@ canvas {
     </div>
 
     <nav>
-        <a href="dashboard.php" class="nav-link active">
+        <a href="Dashboard.php" class="nav-link active">
             <i class="fas fa-seedling"></i>
-            <span>Variety Management</span>
+            <span>Dashboard</span>
         </a>
         <a href="Farmer_Receive.php" class="nav-link">
             <i class="fas fa-users"></i>
