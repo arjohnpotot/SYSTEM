@@ -134,20 +134,28 @@ $total_mortality_value = array_sum($mortality_counts);
 $distribution_url = "https://validator-b9503-default-rtdb.firebaseio.com/SeedlingDistributions.json";
 $data_distribution = fetchFirebaseData($distribution_url);
 
+$distribution_data = []; // Changed to associative array for grouping
 $distribution_labels = [];
 $distribution_counts = [];
 
 if ($data_distribution && is_array($data_distribution)) {
     foreach ($data_distribution as $key => $record) {
         if (is_array($record)) {
-            $type = !empty($record['seedlingType']) ? $record['seedlingType'] : 'Unknown';
+            $type = !empty($record['seedlingType']) ? trim($record['seedlingType']) : 'Unknown';
             $num = (int)($record['numSeedlings'] ?? 0);
             
-            $distribution_labels[] = $type;
-            $distribution_counts[] = $num;
+            // Group by seedling type - sum up quantities for same types
+            if (!isset($distribution_data[$type])) {
+                $distribution_data[$type] = 0;
+            }
+            $distribution_data[$type] += $num;
         }
     }
 }
+
+// Extract labels and counts from grouped data
+$distribution_labels = array_keys($distribution_data);
+$distribution_counts = array_values($distribution_data);
 
 $total_distribution_records = count($data_distribution);
 $total_distribution_value = array_sum($distribution_counts);
@@ -1110,7 +1118,8 @@ new Chart(document.getElementById('doughnutChart'), {
             backgroundColor: generateColors(<?php echo count($distribution_labels); ?>),
             borderWidth: 2,
             borderColor: '#ffffff',
-            hoverBorderWidth: 3
+            hoverBorderWidth: 3,
+            hoverOffset: 8
         }] 
     },
     options: {
@@ -1120,7 +1129,35 @@ new Chart(document.getElementById('doughnutChart'), {
             ...chartOptions.plugins,
             legend: {
                 ...chartOptions.plugins.legend,
-                position: 'right'
+                position: 'right',
+                labels: {
+                    font: {
+                        family: 'Poppins',
+                        size: 11
+                    },
+                    color: '#4a5568',
+                    padding: 15,
+                    // Show value next to label
+                    generateLabels: function(chart) {
+                        const data = chart.data;
+                        return data.labels.map((label, i) => ({
+                            text: `${label} (${data.datasets[0].data[i]})`,
+                            fillStyle: data.datasets[0].backgroundColor[i],
+                            hidden: false,
+                            index: i
+                        }));
+                    }
+                }
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                        const value = context.parsed;
+                        const percentage = ((value / total) * 100).toFixed(1);
+                        return ` ${context.label}: ${value} seedlings (${percentage}%)`;
+                    }
+                }
             }
         }
     }
