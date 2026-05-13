@@ -424,7 +424,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="login-container">
             <!-- DENR Logo -->
             <div class="logo-wrapper">
-                <img src="/DENR-SYSTEM/SYSTEM/image/DENR.jpg" alt="DENR Logo" class="logo">
+                <img src="image/DENR.jpg" alt="DENR Logo" class="logo">
             </div>
             
             <!-- Title Below Logo -->
