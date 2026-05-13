@@ -702,7 +702,7 @@ canvas {
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar">
     <div class="logo">
-        <a href="Dashboard.php">
+        <a href="dashboard.php">
             <img src="image/DENR.jpg" alt="DENR Logo">
         </a>
         <div class="sidebar-title">
@@ -920,6 +920,9 @@ canvas {
     <div class="quick-actions">
         <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
         <div class="action-buttons">
+            <a href="Dashboard.php" class="action-btn">
+                <i class="fas fa-plus-circle"></i> New Request
+            </a>
             <a href="Farmer_Receive.php" class="action-btn">
                 <i class="fas fa-plus-circle"></i> New Request
             </a>
