@@ -851,7 +851,7 @@ canvas {
 
     <nav>
         <a href="Dashboard.php" class="nav-link active">
-            <i class="fas fa-seedling"></i>
+            <i class="fas fa-tachometer-alt"></i>
             <span>Dashboard</span>
         </a>
         <a href="Farmer_Receive.php" class="nav-link">
