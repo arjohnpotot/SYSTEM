@@ -744,11 +744,11 @@ $mortality_breaks = calculateBreaks($mortality_values);
   <!-- Sidebar -->
   <div class="sidebar">
     <div class="logo">
-      <a href="dashboard.php"><img src="image/DENR.jpg" alt="DENR" /></a>
+      <a href="Dashboard.php"><img src="image/DENR.jpg" alt="DENR" /></a>
       <h3 class="sidebar-title">Department of Environment<br>and Natural Resources</h3>
     </div>
     <nav>
-      <a href="dashboard.php" class="nav-link"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
+      <a href="Dashboard.php" class="nav-link"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a>
       <a href="Farmer_Receive.php" class="nav-link"><i class="fas fa-users"></i><span>Land Owner Request</span></a>
       <a href="mortality.php" class="nav-link"><i class="fas fa-exclamation-triangle"></i><span>Mortality</span></a>
       <a href="SeedlingDistribution.php" class="nav-link"><i class="fas fa-seedling"></i><span>Seedling Distribution</span></a>
