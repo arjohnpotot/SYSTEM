@@ -702,7 +702,7 @@ canvas {
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar">
     <div class="logo">
-        <a href="dashboard.php">
+        <a href="Dashboard.php">
             <img src="image/DENR.jpg" alt="DENR Logo">
         </a>
         <div class="sidebar-title">
