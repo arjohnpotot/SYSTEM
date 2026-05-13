@@ -134,15 +134,25 @@ $total_mortality_value = array_sum($mortality_counts);
 $distribution_url = "https://validator-b9503-default-rtdb.firebaseio.com/SeedlingDistributions.json";
 $data_distribution = fetchFirebaseData($distribution_url);
 
-$distribution_data = []; // Changed to associative array for grouping
+$distribution_data = []; // Associative array for grouping
 $distribution_labels = [];
 $distribution_counts = [];
 
 if ($data_distribution && is_array($data_distribution)) {
     foreach ($data_distribution as $key => $record) {
         if (is_array($record)) {
+            // Get the seedling type and clean it thoroughly
             $type = !empty($record['seedlingType']) ? trim($record['seedlingType']) : 'Unknown';
+            
+            // Normalize the type: capitalize first letter of each word, remove extra spaces
+            $type = ucwords(strtolower($type));
+            // Remove multiple spaces
+            $type = preg_replace('/\s+/', ' ', $type);
+            
             $num = (int)($record['numSeedlings'] ?? 0);
+            
+            // Debug: Log what we're processing
+            error_log("Processing type: '$type' with quantity: $num");
             
             // Group by seedling type - sum up quantities for same types
             if (!isset($distribution_data[$type])) {
@@ -153,9 +163,15 @@ if ($data_distribution && is_array($data_distribution)) {
     }
 }
 
+// Sort the data alphabetically for consistent display
+ksort($distribution_data);
+
 // Extract labels and counts from grouped data
 $distribution_labels = array_keys($distribution_data);
 $distribution_counts = array_values($distribution_data);
+
+// Debug: Log the final grouped data
+error_log("Grouped distribution data: " . print_r($distribution_data, true));
 
 $total_distribution_records = count($data_distribution);
 $total_distribution_value = array_sum($distribution_counts);
@@ -928,9 +944,6 @@ canvas {
     <div class="quick-actions">
         <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
         <div class="action-buttons">
-            <a href="Dashboard.php" class="action-btn">
-                <i class="fas fa-plus-circle"></i> New Request
-            </a>
             <a href="Farmer_Receive.php" class="action-btn">
                 <i class="fas fa-plus-circle"></i> New Request
             </a>
@@ -1109,13 +1122,51 @@ new Chart(document.getElementById('lineChart'), {
 
 // Doughnut Chart - Distribution by Type
 <?php if (!empty($distribution_labels) && !empty($distribution_counts)): ?>
+// Create a consistent color mapping for each unique type
+const distributionLabels = <?php echo json_encode($distribution_labels); ?>;
+const distributionData = <?php echo json_encode($distribution_counts); ?>;
+
+// Define specific colors for known seedling types
+const seedlingColors = {
+    'Falcata': '#4299e1',        // Blue
+    'Narra': '#48bb78',          // Green
+    'Mahogany': '#ed8936',       // Orange
+    'Rubber': '#f56565',         // Red
+    'Coconut': '#9f7aea',        // Purple
+    'Coffee': '#38b2ac',         // Teal
+    'Cacao': '#d53f8c',          // Pink
+    'Mango': '#667eea',          // Indigo
+    'Banana': '#ecc94b',         // Yellow
+    'Gmelina': '#a0aec0',        // Gray
+    'Unknown': '#cbd5e0'         // Light gray for unknown
+};
+
+// Generate colors based on the label name to ensure consistency
+const backgroundColors = distributionLabels.map((label, index) => {
+    // Use predefined color if available, otherwise generate from hash
+    if (seedlingColors[label]) {
+        return seedlingColors[label];
+    }
+    // Generate a consistent color from the label string using hash
+    let hash = 0;
+    for (let i = 0; i < label.length; i++) {
+        hash = label.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash % 360);
+    return `hsl(${hue}, 65%, 55%)`;
+});
+
+console.log('Distribution Labels:', distributionLabels);
+console.log('Distribution Data:', distributionData);
+console.log('Background Colors:', backgroundColors);
+
 new Chart(document.getElementById('doughnutChart'), {
     type: 'doughnut',
     data: { 
-        labels: <?php echo json_encode($distribution_labels); ?>, 
+        labels: distributionLabels, 
         datasets: [{ 
-            data: <?php echo json_encode($distribution_counts); ?>, 
-            backgroundColor: generateColors(<?php echo count($distribution_labels); ?>),
+            data: distributionData, 
+            backgroundColor: backgroundColors,
             borderWidth: 2,
             borderColor: '#ffffff',
             hoverBorderWidth: 3,
@@ -1137,11 +1188,12 @@ new Chart(document.getElementById('doughnutChart'), {
                     },
                     color: '#4a5568',
                     padding: 15,
-                    // Show value next to label
+                    // Show value and percentage next to label
                     generateLabels: function(chart) {
                         const data = chart.data;
+                        const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
                         return data.labels.map((label, i) => ({
-                            text: `${label} (${data.datasets[0].data[i]})`,
+                            text: `${label}: ${data.datasets[0].data[i]} pcs (${((data.datasets[0].data[i] / total) * 100).toFixed(1)}%)`,
                             fillStyle: data.datasets[0].backgroundColor[i],
                             hidden: false,
                             index: i
