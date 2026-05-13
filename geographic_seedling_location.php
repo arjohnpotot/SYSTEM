@@ -444,7 +444,7 @@ body {
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar">
     <div class="logo">
-        <a href="dashboard.php">
+        <a href="Dashboard.php">
             <img src="image/DENR.jpg" alt="DENR Logo">
         </a>
         <div class="sidebar-title">
@@ -453,7 +453,7 @@ body {
     </div>
 
     <nav>
-        <a href="dashboard.php" class="nav-link">
+        <a href="Dashboard.php" class="nav-link">
             <i class="fas fa-tachometer-alt"></i>
             <span>Dashboard</span>
         </a>
