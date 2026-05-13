@@ -735,7 +735,7 @@ canvas {
     </div>
 
     <nav>
-        <a href="dashboard.php" class="nav-link active">
+        <a href="Dashboard.php" class="nav-link active">
             <i class="fas fa-tachometer-alt"></i>
             <span>Dashboard</span>
         </a>
