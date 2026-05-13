@@ -703,7 +703,7 @@ canvas {
 <div class="sidebar">
     <div class="logo">
         <a href="dashboard.php">
-            <img src="/DENR-SYSTEM/SYSTEM/image/DENR.jpg" alt="DENR Logo">
+            <img src="image/DENR.jpg" alt="DENR Logo">
         </a>
         <div class="sidebar-title">
             Department of Environment<br>and Natural Resources
