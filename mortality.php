@@ -26,6 +26,17 @@ sort($municipalities);
 sort($barangays);
 sort($varieties);
 
+// Extract years from data for year filter
+$years = [];
+foreach ($data as $record) {
+    if (!empty($record['date'])) {
+        $year = date('Y', strtotime($record['date']));
+        $years[] = $year;
+    }
+}
+$years = array_unique($years);
+sort($years);
+
 // Find highest mortality area
 $highestMortality = 0;
 $highestArea = '';
@@ -36,6 +47,12 @@ foreach ($data as $record) {
         $highestArea = ($record['municipality'] ?? '') . ' - ' . ($record['barangay'] ?? '');
     }
 }
+
+// Prepare data for charts
+$chartData = [
+    'allData' => $data,
+    'years' => $years
+];
 ?>
 
 <!DOCTYPE html>
@@ -396,12 +413,18 @@ body {
     display: block;
 }
 
-/* ===== CHART CARD ===== */
+/* ===== CHART CARDS ===== */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
 .chart-card {
     background: white;
     border-radius: 15px;
     padding: 20px;
-    margin-bottom: 30px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
@@ -420,8 +443,23 @@ body {
 }
 
 .chart-container {
-    height: 300px;
+    height: 350px;
     position: relative;
+}
+
+.year-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.year-selector select {
+    padding: 5px 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
 }
 
 /* ===== TABLE CARD ===== */
@@ -522,14 +560,12 @@ body {
 
 /* ===== DATA TABLE CUSTOMIZATION ===== */
 .dataTables_wrapper .dataTables_length,
-.dataTables_wrapper .dataTables_filter,
 .dataTables_wrapper .dataTables_info,
 .dataTables_wrapper .dataTables_paginate {
     margin-bottom: 15px;
     color: #4a5568;
 }
 
-/* Hide default DataTables search since we have custom filters */
 .dataTables_filter {
     display: none;
 }
@@ -562,7 +598,7 @@ body {
     
     .sidebar,
     .stats-grid,
-    .chart-card,
+    .charts-grid,
     .filter-section,
     .page-header,
     .dataTables_length,
@@ -647,6 +683,10 @@ body {
     
     .filter-group {
         min-width: 100%;
+    }
+    
+    .charts-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -863,14 +903,43 @@ body {
         </div>
     </div>
 
-    <!-- Chart Card -->
-    <div class="chart-card">
-        <h3>
-            <i class="fas fa-chart-bar"></i>
-            Mortality Distribution by Area
-        </h3>
-        <div class="chart-container">
-            <canvas id="mortalityChart"></canvas>
+    <!-- Charts Grid -->
+    <div class="charts-grid">
+        <!-- Top 5 Areas Chart -->
+        <div class="chart-card">
+            <h3>
+                <i class="fas fa-chart-bar"></i>
+                Top 5 Areas with Highest Mortality
+            </h3>
+            <div class="chart-container">
+                <canvas id="topAreasChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Monthly Trend Chart -->
+        <div class="chart-card">
+            <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                <span>
+                    <i class="fas fa-chart-line"></i>
+                    Monthly Mortality Trend
+                </span>
+                <div class="year-selector">
+                    <label for="yearSelect" style="font-size: 14px; color: #4a5568; margin: 0;">
+                        <i class="fas fa-calendar-alt"></i> Year:
+                    </label>
+                    <select id="yearSelect" onchange="updateMonthlyChart()">
+                        <option value="">All Years</option>
+                        <?php foreach ($years as $year): ?>
+                            <option value="<?= $year ?>" <?= $year == date('Y') ? 'selected' : '' ?>>
+                                <?= $year ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </h3>
+            <div class="chart-container">
+                <canvas id="monthlyTrendChart"></canvas>
+            </div>
         </div>
     </div>
 
@@ -939,6 +1008,17 @@ body {
 <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
 
 <script>
+// Pass PHP data to JavaScript
+var allData = <?php echo json_encode($data); ?>;
+
+// Chart instances
+var topAreasChart;
+var monthlyTrendChart;
+
+// Month names
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+
 $(document).ready(function() {
     // Initialize DataTable
     var table = $('#mortalityTable').DataTable({
@@ -960,8 +1040,6 @@ $(document).ready(function() {
         order: [[0, 'desc']]
     });
 
-    // ===== CUSTOM FILTER FUNCTIONALITY =====
-    
     // Add custom filtering for Municipality, Barangay, and Variety
     $.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
         var selectedMun = $('#filterMunicipality').val();
@@ -972,17 +1050,14 @@ $(document).ready(function() {
         var rowBgy = data[2]; // Barangay column (index 2)
         var rowVariety = data[3]; // Variety column (index 3)
         
-        // Check Municipality filter
         if (selectedMun && rowMun !== selectedMun) {
             return false;
         }
         
-        // Check Barangay filter
         if (selectedBgy && rowBgy !== selectedBgy) {
             return false;
         }
         
-        // Check Variety filter
         if (selectedVariety && rowVariety !== selectedVariety) {
             return false;
         }
@@ -994,10 +1069,15 @@ $(document).ready(function() {
     $('#filterMunicipality, #filterBarangay, #filterVariety').on('change', function() {
         table.draw();
         updateFilterInfo(table);
+        updateCharts(); // Update charts when filters change
     });
     
     // Initial info update
     updateFilterInfo(table);
+    
+    // Initialize charts
+    initTopAreasChart();
+    updateMonthlyChart();
 });
 
 // Update filter info message
@@ -1031,6 +1111,249 @@ function resetFilters() {
     $('#filterVariety').val('');
     $('#mortalityTable').DataTable().draw();
     updateFilterInfo($('#mortalityTable').DataTable());
+    updateCharts();
+}
+
+// Get filtered data for charts
+function getFilteredData() {
+    var selectedMun = $('#filterMunicipality').val();
+    var selectedBgy = $('#filterBarangay').val();
+    var selectedVariety = $('#filterVariety').val();
+    
+    return allData.filter(function(record) {
+        if (selectedMun && record.municipality !== selectedMun) return false;
+        if (selectedBgy && record.barangay !== selectedBgy) return false;
+        if (selectedVariety && record.variety !== selectedVariety) return false;
+        return true;
+    });
+}
+
+// Initialize Top 5 Areas Chart
+function initTopAreasChart() {
+    var filteredData = getFilteredData();
+    
+    // Aggregate mortality by area (municipality - barangay)
+    var areaMortality = {};
+    filteredData.forEach(function(record) {
+        var area = (record.municipality || 'Unknown') + ' - ' + (record.barangay || 'Unknown');
+        var died = parseInt(record.died) || 0;
+        areaMortality[area] = (areaMortality[area] || 0) + died;
+    });
+    
+    // Sort and get top 5
+    var sortedAreas = Object.entries(areaMortality)
+        .sort(function(a, b) { return b[1] - a[1]; })
+        .slice(0, 5);
+    
+    var labels = sortedAreas.map(function(item) { return item[0]; });
+    var values = sortedAreas.map(function(item) { return item[1]; });
+    
+    // If no data, show placeholder
+    if (labels.length === 0) {
+        labels = ['No data available'];
+        values = [0];
+    }
+    
+    var ctx = document.getElementById('topAreasChart').getContext('2d');
+    
+    // Destroy existing chart if it exists
+    if (topAreasChart) {
+        topAreasChart.destroy();
+    }
+    
+    topAreasChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Total Mortality',
+                data: values,
+                backgroundColor: [
+                    'rgba(245, 101, 101, 0.8)',
+                    'rgba(237, 137, 54, 0.8)',
+                    'rgba(236, 201, 75, 0.8)',
+                    'rgba(159, 122, 234, 0.8)',
+                    'rgba(72, 187, 120, 0.8)'
+                ],
+                borderColor: [
+                    '#e53e3e',
+                    '#dd6b20',
+                    '#d69e2e',
+                    '#805ad5',
+                    '#38a169'
+                ],
+                borderWidth: 2,
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Mortality: ' + context.parsed.y.toLocaleString() + ' seedlings';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: '#e2e8f0'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Number of Dead Seedlings',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Update Monthly Trend Chart
+function updateMonthlyChart() {
+    var selectedYear = $('#yearSelect').val();
+    var filteredData = getFilteredData();
+    
+    // Initialize monthly data
+    var monthlyData = {};
+    monthNames.forEach(function(month, index) {
+        monthlyData[index] = 0;
+    });
+    
+    // Aggregate mortality by month
+    filteredData.forEach(function(record) {
+        if (record.date) {
+            var date = new Date(record.date);
+            var year = date.getFullYear();
+            var month = date.getMonth(); // 0-11
+            
+            // Filter by selected year
+            if (!selectedYear || year.toString() === selectedYear) {
+                var died = parseInt(record.died) || 0;
+                monthlyData[month] += died;
+            }
+        }
+    });
+    
+    var ctx = document.getElementById('monthlyTrendChart').getContext('2d');
+    
+    // Destroy existing chart if it exists
+    if (monthlyTrendChart) {
+        monthlyTrendChart.destroy();
+    }
+    
+    // Check if there's any data
+    var hasData = Object.values(monthlyData).some(function(value) { return value > 0; });
+    
+    monthlyTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: monthNames,
+            datasets: [{
+                label: selectedYear ? 'Mortality in ' + selectedYear : 'Total Mortality',
+                data: Object.values(monthlyData),
+                borderColor: '#e53e3e',
+                backgroundColor: 'rgba(229, 62, 62, 0.1)',
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#e53e3e',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 6,
+                pointHoverRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Mortality: ' + context.parsed.y.toLocaleString() + ' seedlings';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: '#e2e8f0'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Number of Dead Seedlings',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Month',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // If no data, add annotation
+    if (!hasData && !selectedYear) {
+        // Show message that there's no data
+        console.log('No mortality data available for the selected criteria');
+    }
+}
+
+// Update all charts
+function updateCharts() {
+    initTopAreasChart();
+    updateMonthlyChart();
 }
 
 // Print only the filtered data
@@ -1234,74 +1557,6 @@ function printFilteredData() {
     
     printWindow.document.close();
 }
-
-// Chart initialization
-const ctx = document.getElementById('mortalityChart').getContext('2d');
-// Get top 5 areas by mortality
-var allData = <?php echo json_encode($data); ?>;
-// Sort by died descending
-allData.sort(function(a, b) {
-    return (parseInt(b.died) || 0) - (parseInt(a.died) || 0);
-});
-var top5 = allData.slice(0, 5);
-
-new Chart(ctx, {
-    type: 'bar',
-    data: {
-        labels: top5.map(function(r) {
-            return (r.municipality || '') + ' - ' + (r.barangay || '');
-        }),
-        datasets: [{
-            label: 'Mortality Count',
-            data: top5.map(function(r) {
-                return parseInt(r.died) || 0;
-            }),
-            backgroundColor: [
-                'rgba(245, 101, 101, 0.8)',
-                'rgba(237, 137, 54, 0.8)',
-                'rgba(236, 201, 75, 0.8)',
-                'rgba(159, 122, 234, 0.8)',
-                'rgba(72, 187, 120, 0.8)'
-            ],
-            borderColor: [
-                '#e53e3e',
-                '#dd6b20',
-                '#d69e2e',
-                '#805ad5',
-                '#38a169'
-            ],
-            borderWidth: 1
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: {
-                display: false
-            },
-            title: {
-                display: true,
-                text: 'Top 5 Areas with Highest Mortality',
-                font: {
-                    size: 14
-                }
-            }
-        },
-        scales: {
-            y: {
-                beginAtZero: true,
-                grid: {
-                    color: '#e2e8f0'
-                },
-                title: {
-                    display: true,
-                    text: 'Number of Dead Seedlings'
-                }
-            }
-        }
-    }
-});
 
 // Loading animation
 $(window).on('load', function() {
