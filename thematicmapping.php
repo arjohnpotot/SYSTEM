@@ -13,17 +13,21 @@ $mortality_url = "https://validator-b9503-default-rtdb.firebaseio.com/SeedlingMo
 
 // Fetch Planted Data
 $planted_response = @file_get_contents($planted_url);
-$planted_data = $planted_response ? json_decode($planted_response, true) : [];
+$planted_raw = $planted_response ? json_decode($planted_response, true) : [];
 
 // Fetch Mortality Data
 $mortality_response = @file_get_contents($mortality_url);
-$mortality_data = $mortality_response ? json_decode($mortality_response, true) : [];
+$mortality_raw = $mortality_response ? json_decode($mortality_response, true) : [];
+
+// Convert to indexed arrays
+$planted_data = is_array($planted_raw) ? array_values($planted_raw) : [];
+$mortality_data = is_array($mortality_raw) ? array_values($mortality_raw) : [];
 
 // Process Planted Data - Group by barangay
 $planted_by_barangay = [];
 $planted_values = [];
 if (!empty($planted_data)) {
-    foreach ($planted_data as $id => $record) {
+    foreach ($planted_data as $record) {
         if (!is_array($record)) continue;
         
         $barangay = trim($record['barangay'] ?? '');
@@ -56,7 +60,7 @@ if (!empty($planted_data)) {
 $mortality_by_barangay = [];
 $mortality_values = [];
 if (!empty($mortality_data)) {
-    foreach ($mortality_data as $id => $record) {
+    foreach ($mortality_data as $record) {
         if (!is_array($record)) continue;
         
         $barangay = trim($record['barangay'] ?? '');
@@ -96,6 +100,35 @@ $survivalRate = $totalPlanted > 0 ? round((($totalPlanted - $totalMortality) / $
 $planted_locations = count($planted_by_barangay);
 $mortality_locations = count($mortality_by_barangay);
 
+// Get unique values for chart filters
+$municipalities = array_unique(array_merge(
+    array_column($planted_data, 'municipality'),
+    array_column($mortality_data, 'municipality')
+));
+$municipalities = array_filter($municipalities);
+sort($municipalities);
+
+$varieties = array_unique(array_merge(
+    array_column($planted_data, 'variety'),
+    array_column($mortality_data, 'variety')
+));
+$varieties = array_filter($varieties);
+sort($varieties);
+
+// Extract years from both datasets
+$years = [];
+foreach (array_merge($planted_data, $mortality_data) as $record) {
+    $dateField = $record['date'] ?? $record['datePlanted'] ?? '';
+    if (!empty($dateField)) {
+        $timestamp = strtotime($dateField);
+        if ($timestamp !== false) {
+            $years[] = date('Y', $timestamp);
+        }
+    }
+}
+$years = array_unique($years);
+sort($years);
+
 // Calculate classification breaks for thematic mapping
 function calculateBreaks($values, $numClasses = 5) {
     if (empty($values)) return [0, 1, 2, 3, 4, 5];
@@ -129,6 +162,8 @@ $mortality_breaks = calculateBreaks($mortality_values);
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Turf.js -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
     * {
@@ -451,6 +486,64 @@ $mortality_breaks = calculateBreaks($mortality_values);
       z-index: 1;
     }
 
+    /* ===== CHARTS GRID ===== */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .chart-card {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      border: 1px solid #e9ecef;
+    }
+
+    .chart-card h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1a1f2e;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .chart-card h3 i {
+      color: #9f7aea;
+    }
+
+    .chart-container {
+      height: 350px;
+      position: relative;
+    }
+
+    .year-selector {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+
+    .year-selector select,
+    .chart-filters select {
+      padding: 5px 15px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 14px;
+      background: white;
+    }
+
+    .chart-filters {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
     /* ===== LEGEND (Geography Style) ===== */
     .legend-container {
       display: flex;
@@ -607,6 +700,80 @@ $mortality_breaks = calculateBreaks($mortality_values);
       color: #495057;
     }
 
+    /* ===== FILTER SECTION ===== */
+    .filter-section {
+      background: white;
+      border-radius: 16px;
+      padding: 20px 25px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      border: 1px solid #e9ecef;
+    }
+
+    .filter-section h5 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1f2e;
+      margin-bottom: 15px;
+    }
+
+    .filter-section h5 i {
+      color: #9f7aea;
+      margin-right: 8px;
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 15px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+
+    .filter-group {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .filter-group label {
+      font-weight: 500;
+      font-size: 13px;
+      color: #4a5568;
+      margin-bottom: 5px;
+      display: block;
+    }
+
+    .filter-group select {
+      width: 100%;
+      padding: 10px 15px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: all 0.3s ease;
+      background: white;
+    }
+
+    .filter-group select:focus {
+      outline: none;
+      border-color: #9f7aea;
+      box-shadow: 0 0 0 3px rgba(159, 122, 234, 0.1);
+    }
+
+    .btn-filter-reset {
+      background: #e2e8f0;
+      color: #4a5568;
+      border: none;
+      padding: 10px 25px;
+      border-radius: 8px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .btn-filter-reset:hover {
+      background: #cbd5e0;
+    }
+
     /* ===== RESPONSIVE ===== */
     @media (max-width: 1400px) {
       .stats-grid {
@@ -617,6 +784,9 @@ $mortality_breaks = calculateBreaks($mortality_values);
     @media (max-width: 1200px) {
       .stats-grid {
         grid-template-columns: repeat(2, 1fr);
+      }
+      .charts-grid {
+        grid-template-columns: 1fr;
       }
     }
 
@@ -755,10 +925,7 @@ $mortality_breaks = calculateBreaks($mortality_values);
       <a href="seedlingplanted.php" class="nav-link"><i class="fas fa-tree"></i><span>Seedling Planted</span></a>
       <a href="thematicmapping.php" class="nav-link active"><i class="fas fa-map"></i><span>Thematic Map</span></a>
       <a href="geographic_seedling_location.php" class="nav-link"><i class="fas fa-globe-asia"></i><span>Geographic Location</span></a>
-       <a href="variety.php" class="nav-link">
-            <i class="fas fa-seedling"></i>
-            <span>Manage Variety</span>
-        </a>
+      <a href="variety.php" class="nav-link"><i class="fas fa-seedling"></i><span>Manage Variety</span></a>
     </nav>
     <a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i><span>Logout</span></a>
   </div>
@@ -836,6 +1003,106 @@ $mortality_breaks = calculateBreaks($mortality_values);
       </div>
     </div>
 
+    <!-- FILTER SECTION FOR CHARTS -->
+    <div class="filter-section">
+      <h5><i class="fas fa-filter"></i> Filter Charts by Location & Variety</h5>
+      <div class="filter-row">
+        <div class="filter-group">
+          <label><i class="fas fa-city"></i> Municipality</label>
+          <select id="filterMunicipality" class="form-select" onchange="updateAllCharts()">
+            <option value="">All Municipalities</option>
+            <?php foreach ($municipalities as $municipality): ?>
+              <?php if (!empty($municipality)): ?>
+                <option value="<?= htmlspecialchars($municipality) ?>"><?= htmlspecialchars($municipality) ?></option>
+              <?php endif; ?>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label><i class="fas fa-leaf"></i> Seedling Variety</label>
+          <select id="filterVariety" class="form-select" onchange="updateAllCharts()">
+            <option value="">All Varieties</option>
+            <?php foreach ($varieties as $variety): ?>
+              <?php if (!empty($variety)): ?>
+                <option value="<?= htmlspecialchars($variety) ?>"><?= htmlspecialchars($variety) ?></option>
+              <?php endif; ?>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="filter-group" style="flex: 0 0 auto;">
+          <label>&nbsp;</label>
+          <button class="btn-filter-reset" onclick="resetChartFilters()">
+            <i class="fas fa-undo"></i> Reset Filters
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Grid -->
+    <div class="charts-grid">
+      <!-- Top 5 Areas Chart -->
+      <div class="chart-card">
+        <h3 style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+          <span>
+            <i class="fas fa-chart-bar"></i>
+            Top 5 Areas with Highest Planting
+          </span>
+          <div class="chart-filters">
+            <select id="topYearSelect" onchange="initTopAreasChart()" class="form-select form-select-sm">
+              <option value="">All Years</option>
+              <?php foreach ($years as $year): ?>
+                <option value="<?= $year ?>"><?= $year ?></option>
+              <?php endforeach; ?>
+            </select>
+            <select id="topMonthSelect" onchange="initTopAreasChart()" class="form-select form-select-sm">
+              <option value="">All Months</option>
+              <option value="0">January</option>
+              <option value="1">February</option>
+              <option value="2">March</option>
+              <option value="3">April</option>
+              <option value="4">May</option>
+              <option value="5">June</option>
+              <option value="6">July</option>
+              <option value="7">August</option>
+              <option value="8">September</option>
+              <option value="9">October</option>
+              <option value="10">November</option>
+              <option value="11">December</option>
+            </select>
+          </div>
+        </h3>
+        <div class="chart-container">
+          <canvas id="topAreasChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Monthly Trend Chart -->
+      <div class="chart-card">
+        <h3 style="display: flex; justify-content: space-between; align-items: center;">
+          <span>
+            <i class="fas fa-chart-line"></i>
+            Monthly Planting & Mortality Trend
+          </span>
+          <div class="year-selector">
+            <label for="yearSelect" style="font-size: 14px; color: #4a5568; margin: 0;">
+              <i class="fas fa-calendar-alt"></i> Year:
+            </label>
+            <select id="yearSelect" onchange="updateMonthlyChart()">
+              <option value="">All Years</option>
+              <?php foreach ($years as $year): ?>
+                <option value="<?= $year ?>" <?= $year == date('Y') ? 'selected' : '' ?>>
+                  <?= $year ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        </h3>
+        <div class="chart-container">
+          <canvas id="monthlyTrendChart"></canvas>
+        </div>
+      </div>
+    </div>
+
     <!-- Map Card -->
     <div class="map-card">
       <div class="map-header">
@@ -904,10 +1171,10 @@ $mortality_breaks = calculateBreaks($mortality_values);
 
 <script>
 // Pass PHP data to JavaScript
-const plantedData = <?php echo json_encode($planted_by_barangay); ?>;
-const mortalityData = <?php echo json_encode($mortality_by_barangay); ?>;
+const plantedData = <?php echo json_encode($planted_data); ?>;
+const mortalityData = <?php echo json_encode($mortality_data); ?>;
 
-// Current data type
+// Current data type for map
 let currentDataType = 'planted';
 
 // Map variables
@@ -917,6 +1184,14 @@ let geoJsonData = null;
 let labelsVisible = true;
 let labelMarkers = [];
 let tooltip = null;
+
+// Chart instances
+let topAreasChart;
+let monthlyTrendChart;
+
+// Month names
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                    'July', 'August', 'September', 'October', 'November', 'December'];
 
 // Barangays list for filtering
 const Barangays = ["Alegre","Alta Vista","Anonang","Bitaug","Bonifacio","Buenavista","Darapuay","Dolo","Eman","Kinuskusan","Libertad","Linawan","Mabuhay","Mabunga","Managa","Marber","New Clarin","Poblacion Uno","Poblacion Dos","Rizal","Santo Niño","Sibayan","Tinongtongan","Tubod","Union","Balabag","Goma","Aplaya","Bato","Kapatagan","Binaton","Cogon","Dulangan","Kiagot","Mahayahay","Ruparan","San Jose","San Miguel","San Roque","Sinawilan","Soong","Tiguman","Zone 1","Zone 2","Zone 3"];
@@ -929,20 +1204,16 @@ const mortalityColors = ['#fee5d9', '#fcae91', '#fb6a4a', '#de2d26', '#a50f15'];
 function initMap() {
     map = L.map('map').setView([6.78, 125.35], 12);
     
-    // Geography-style basemap
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
         subdomains: 'abcd',
         maxZoom: 19
     }).addTo(map);
     
-    // Add scale control
     L.control.scale({ imperial: false, metric: true, position: 'bottomleft' }).addTo(map);
     
-    // Initialize tooltip
     tooltip = L.tooltip({ className: 'map-tooltip', direction: 'top', sticky: true });
     
-    // Load GeoJSON
     loadGeoJson();
 }
 
@@ -1019,6 +1290,37 @@ function filterBarangays(feature) {
            Barangays.some(b => normalize(b) === normalize(brgyName));
 }
 
+// Build barangay lookup from raw data
+function buildBarangayLookup(rawData, valueKey) {
+    const lookup = {};
+    if (!rawData || !Array.isArray(rawData)) return lookup;
+    
+    rawData.forEach(record => {
+        const muni = normalize(record.municipality || '');
+        const bgy = normalize(record.barangay || '');
+        const value = parseInt(record[valueKey] || 0);
+        const variety = record.variety || '';
+        
+        if (!muni || !bgy) return;
+        
+        const key = muni + '|' + bgy;
+        if (!lookup[key]) {
+            lookup[key] = {
+                municipality: record.municipality || '',
+                barangay: record.barangay || '',
+                total: 0,
+                varieties: []
+            };
+        }
+        lookup[key].total += value;
+        if (variety && !lookup[key].varieties.includes(variety)) {
+            lookup[key].varieties.push(variety);
+        }
+    });
+    
+    return lookup;
+}
+
 // Load GeoJSON
 function loadGeoJson() {
     showLoading();
@@ -1049,29 +1351,28 @@ function renderMap() {
     labelMarkers.forEach(marker => map.removeLayer(marker));
     labelMarkers = [];
     
-    const selectedBarangays = [];
-    const dataSource = currentDataType === 'planted' ? plantedData : mortalityData;
+    const rawData = currentDataType === 'planted' ? plantedData : mortalityData;
+    const valueKey = currentDataType === 'planted' ? 'numSeedlings' : 'died';
+    const dataLookup = buildBarangayLookup(rawData, valueKey);
     const colors = currentDataType === 'planted' ? plantedColors : mortalityColors;
     
-    const breaks = calculateBreaks(dataSource);
+    const breaks = calculateBreaks(dataLookup);
     const legendContainer = currentDataType === 'planted' ? 'plantedLegendItems' : 'mortalityLegendItems';
     const unit = currentDataType === 'planted' ? 'seedlings' : 'died';
     generateLegend(breaks, colors, legendContainer, unit);
     
+    const selectedBarangays = [];
+    
     barangayLayer = L.geoJSON(geoJsonData, {
         filter: filterBarangays,
         style: function(feature) {
-            const muniName = feature.properties.NAME_2 || feature.properties.MUNICIPALITY || '';
-            const brgyName = feature.properties.NAME_3 || feature.properties.BARANGAY || '';
+            const muniName = normalize(feature.properties.NAME_2 || feature.properties.MUNICIPALITY || '');
+            const brgyName = normalize(feature.properties.NAME_3 || feature.properties.BARANGAY || '');
             
             let total = 0;
-            for (const key in dataSource) {
-                const item = dataSource[key];
-                if (normalize(item.municipality) === normalize(muniName) && 
-                    normalize(item.barangay) === normalize(brgyName)) {
-                    total = currentDataType === 'planted' ? item.totalPlanted : item.totalMortality;
-                    break;
-                }
+            const key = muniName + '|' + brgyName;
+            if (dataLookup[key]) {
+                total = dataLookup[key].total;
             }
             
             const fillColor = getColor(total, breaks, colors);
@@ -1085,22 +1386,16 @@ function renderMap() {
             };
         },
         onEachFeature: function(feature, layer) {
-            const muniName = feature.properties.NAME_2 || feature.properties.MUNICIPALITY || '';
-            const brgyName = feature.properties.NAME_3 || feature.properties.BARANGAY || '';
+            const muniName = normalize(feature.properties.NAME_2 || feature.properties.MUNICIPALITY || '');
+            const brgyName = normalize(feature.properties.NAME_3 || feature.properties.BARANGAY || '');
             
-            let barangayInfo = null;
-            for (const key in dataSource) {
-                const item = dataSource[key];
-                if (normalize(item.municipality) === normalize(muniName) && 
-                    normalize(item.barangay) === normalize(brgyName)) {
-                    barangayInfo = item;
-                    break;
-                }
-            }
+            const key = muniName + '|' + brgyName;
+            const barangayInfo = dataLookup[key];
             
-            const total = barangayInfo ? 
-                (currentDataType === 'planted' ? barangayInfo.totalPlanted : barangayInfo.totalMortality) : 0;
+            const total = barangayInfo ? barangayInfo.total : 0;
             const varieties = barangayInfo ? barangayInfo.varieties : [];
+            const displayMuni = barangayInfo ? barangayInfo.municipality : (feature.properties.NAME_2 || '');
+            const displayBgy = barangayInfo ? barangayInfo.barangay : (feature.properties.NAME_3 || '');
             
             layer.on('mouseover', function(e) {
                 const label = currentDataType === 'planted' ? 'Planted' : 'Mortality';
@@ -1108,8 +1403,8 @@ function renderMap() {
                 const unit = currentDataType === 'planted' ? 'seedlings' : 'died';
                 
                 tooltip.setContent(`
-                    <strong>${brgyName}</strong>
-                    <span class="value">${muniName}</span><br>
+                    <strong>${displayBgy}</strong>
+                    <span class="value">${displayMuni}</span><br>
                     <span class="value"><strong>${label}:</strong> ${value} ${unit}</span>
                 `);
                 layer.bindTooltip(tooltip).openTooltip(e.latlng);
@@ -1127,12 +1422,12 @@ function renderMap() {
             
             let popupContent = `
                 <div class="popup-header">
-                    <h4><i class="fas fa-map-pin" style="color: ${colorClass}; margin-right: 6px;"></i>${brgyName}</h4>
+                    <h4><i class="fas fa-map-pin" style="color: ${colorClass}; margin-right: 6px;"></i>${displayBgy}</h4>
                 </div>
                 <div style="padding: 0;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                         <span style="color: #6c757d;">Municipality:</span>
-                        <strong>${muniName}</strong>
+                        <strong>${displayMuni}</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                         <span style="color: #6c757d;">${dataLabel}:</span>
@@ -1149,11 +1444,6 @@ function renderMap() {
                             ).join('')}
                         </div>
                     </div>`;
-            } else {
-                popupContent += `
-                    <div style="margin-top: 10px; color: #adb5bd; font-style: italic;">
-                        No variety data available
-                    </div>`;
             }
             
             popupContent += `</div>`;
@@ -1166,7 +1456,7 @@ function renderMap() {
                 const label = L.marker([coords[1], coords[0]], {
                     icon: L.divIcon({
                         className: "barangay-label",
-                        html: `<span>${brgyName}</span>`
+                        html: `<span>${displayBgy}</span>`
                     }),
                     interactive: false,
                     zIndexOffset: 1000
@@ -1177,7 +1467,7 @@ function renderMap() {
                 }
                 labelMarkers.push(label);
             } catch (e) {
-                console.warn('Could not add label for', brgyName);
+                console.warn('Could not add label for', displayBgy);
             }
             
             selectedBarangays.push(feature);
@@ -1202,10 +1492,8 @@ function renderMap() {
         map.fitBounds(barangayLayer.getBounds(), { padding: [20, 20] });
     }
     
-    const totalBarangays = Object.keys(dataSource).length;
-    const totalValue = currentDataType === 'planted' ? 
-        Object.values(plantedData).reduce((s, d) => s + d.totalPlanted, 0) : 
-        Object.values(mortalityData).reduce((s, d) => s + d.totalMortality, 0);
+    const totalBarangays = Object.keys(dataLookup).length;
+    const totalValue = Object.values(dataLookup).reduce((s, d) => s + d.total, 0);
     
     document.getElementById('dataSummary').textContent = 
         `${totalBarangays} barangays with data. Total: ${totalValue.toLocaleString()} ${currentDataType === 'planted' ? 'seedlings planted' : 'mortality'}.`;
@@ -1244,6 +1532,274 @@ function toggleLabels() {
     });
 }
 
+// ===== CHART FUNCTIONS =====
+
+// Get filtered data for charts
+function getFilteredDataForCharts() {
+    const selectedMun = document.getElementById('filterMunicipality').value;
+    const selectedVariety = document.getElementById('filterVariety').value;
+    
+    // Filter planted data
+    let filteredPlanted = plantedData || [];
+    if (selectedMun) {
+        filteredPlanted = filteredPlanted.filter(r => normalize(r.municipality) === normalize(selectedMun));
+    }
+    if (selectedVariety) {
+        filteredPlanted = filteredPlanted.filter(r => normalize(r.variety) === normalize(selectedVariety));
+    }
+    
+    // Filter mortality data
+    let filteredMortality = mortalityData || [];
+    if (selectedMun) {
+        filteredMortality = filteredMortality.filter(r => normalize(r.municipality) === normalize(selectedMun));
+    }
+    if (selectedVariety) {
+        filteredMortality = filteredMortality.filter(r => normalize(r.variety) === normalize(selectedVariety));
+    }
+    
+    return { planted: filteredPlanted, mortality: filteredMortality };
+}
+
+// Parse date string to get year and month
+function parseDate(dateStr) {
+    if (!dateStr) return null;
+    
+    let parts;
+    let year, month;
+    
+    if (dateStr.includes('-')) {
+        parts = dateStr.split('-');
+        if (parts[0].length === 4) {
+            year = parseInt(parts[0]);
+            month = parseInt(parts[1]) - 1;
+        } else {
+            year = parseInt(parts[2]);
+            month = parseInt(parts[1]) - 1;
+        }
+    } else if (dateStr.includes('/')) {
+        parts = dateStr.split('/');
+        year = parseInt(parts[2]);
+        month = parseInt(parts[0]) - 1;
+    }
+    
+    if (isNaN(year) || isNaN(month)) return null;
+    return { year, month };
+}
+
+// Initialize Top 5 Areas Chart
+function initTopAreasChart() {
+    const { planted: filteredPlanted, mortality: filteredMortality } = getFilteredDataForCharts();
+    const selectedYear = document.getElementById('topYearSelect').value;
+    const selectedMonth = document.getElementById('topMonthSelect').value;
+    
+    // Further filter by year and month
+    let dataToUse = [...filteredPlanted];
+    
+    dataToUse = dataToUse.filter(record => {
+        const dateField = record.date || record.datePlanted || '';
+        const parsed = parseDate(dateField);
+        if (!parsed) return false;
+        
+        if (selectedYear && parsed.year.toString() !== selectedYear) return false;
+        if (selectedMonth !== "" && parsed.month.toString() !== selectedMonth) return false;
+        return true;
+    });
+    
+    // Aggregate by area
+    const areaPlanted = {};
+    dataToUse.forEach(record => {
+        const area = (record.municipality || 'Unknown') + ' - ' + (record.barangay || 'Unknown');
+        const planted = parseInt(record.numSeedlings || 0);
+        areaPlanted[area] = (areaPlanted[area] || 0) + planted;
+    });
+    
+    // Sort top 5
+    const sortedAreas = Object.entries(areaPlanted)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+    
+    const labels = sortedAreas.map(item => item[0]);
+    const values = sortedAreas.map(item => item[1]);
+    
+    if (labels.length === 0) {
+        labels.push('No data');
+        values.push(0);
+    }
+    
+    const ctx = document.getElementById('topAreasChart').getContext('2d');
+    
+    if (topAreasChart) {
+        topAreasChart.destroy();
+    }
+    
+    topAreasChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Total Planted',
+                data: values,
+                backgroundColor: [
+                    'rgba(72, 187, 120, 0.8)',
+                    'rgba(66, 153, 225, 0.8)',
+                    'rgba(159, 122, 234, 0.8)',
+                    'rgba(237, 137, 54, 0.8)',
+                    'rgba(236, 201, 75, 0.8)'
+                ],
+                borderWidth: 2,
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
+    });
+}
+
+// Update Monthly Trend Chart
+function updateMonthlyChart() {
+    const { planted: filteredPlanted, mortality: filteredMortality } = getFilteredDataForCharts();
+    const selectedYear = document.getElementById('yearSelect').value;
+    
+    // Initialize monthly data
+    const monthlyPlanted = {};
+    const monthlyMortality = {};
+    monthNames.forEach((month, index) => {
+        monthlyPlanted[index] = 0;
+        monthlyMortality[index] = 0;
+    });
+    
+    // Aggregate planted by month
+    filteredPlanted.forEach(record => {
+        const dateField = record.date || record.datePlanted || '';
+        const parsed = parseDate(dateField);
+        if (!parsed) return;
+        
+        if (!selectedYear || parsed.year.toString() === selectedYear) {
+            const numSeedlings = parseInt(record.numSeedlings || 0);
+            monthlyPlanted[parsed.month] += numSeedlings;
+        }
+    });
+    
+    // Aggregate mortality by month
+    filteredMortality.forEach(record => {
+        const dateField = record.date || '';
+        const parsed = parseDate(dateField);
+        if (!parsed) return;
+        
+        if (!selectedYear || parsed.year.toString() === selectedYear) {
+            const died = parseInt(record.died || 0);
+            monthlyMortality[parsed.month] += died;
+        }
+    });
+    
+    const ctx = document.getElementById('monthlyTrendChart').getContext('2d');
+    
+    if (monthlyTrendChart) {
+        monthlyTrendChart.destroy();
+    }
+    
+    monthlyTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: monthNames,
+            datasets: [
+                {
+                    label: 'Planted',
+                    data: Object.values(monthlyPlanted),
+                    borderColor: '#38a169',
+                    backgroundColor: 'rgba(72, 187, 120, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: '#38a169',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7
+                },
+                {
+                    label: 'Mortality',
+                    data: Object.values(monthlyMortality),
+                    borderColor: '#e53e3e',
+                    backgroundColor: 'rgba(229, 62, 62, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: '#e53e3e',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' seedlings';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: '#e2e8f0' },
+                    ticks: {
+                        callback: function(value) { return value.toLocaleString(); }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Number of Seedlings',
+                        font: { size: 12, weight: 'bold' }
+                    }
+                },
+                x: {
+                    grid: { display: false },
+                    title: {
+                        display: true,
+                        text: 'Month',
+                        font: { size: 12, weight: 'bold' }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Update all charts
+function updateAllCharts() {
+    initTopAreasChart();
+    updateMonthlyChart();
+}
+
+// Reset chart filters
+function resetChartFilters() {
+    document.getElementById('filterMunicipality').value = '';
+    document.getElementById('filterVariety').value = '';
+    updateAllCharts();
+}
+
 function showLoading() {
     document.getElementById('loadingOverlay').style.display = 'flex';
 }
@@ -1252,8 +1808,11 @@ function hideLoading() {
     document.getElementById('loadingOverlay').style.display = 'none';
 }
 
+// Initialize everything on load
 window.addEventListener('load', () => {
     initMap();
+    initTopAreasChart();
+    updateMonthlyChart();
 });
 </script>
 </body>
