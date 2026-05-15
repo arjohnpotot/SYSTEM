@@ -7,13 +7,16 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
     exit;
 }
 
+/* ===== ERROR REPORTING ===== */
+error_reporting(E_ALL & ~E_WARNING & ~E_NOTICE);
+
 /* ===== FIREBASE FETCH ===== */
 $firebase_url = "https://validator-b9503-default-rtdb.firebaseio.com/SeedlingPlantedReports.json";
 $response = @file_get_contents($firebase_url);
 
 $data = json_decode($response, true);
 
-/* ===== FIX: CONVERT FIREBASE OBJECT TO ARRAY ===== */
+/* ===== CONVERT FIREBASE OBJECT TO ARRAY ===== */
 if (is_array($data)) {
     $data = array_values($data);
 } else {
@@ -21,33 +24,61 @@ if (is_array($data)) {
 }
 
 /* ===== CALCULATE STATISTICS ===== */
-$totalPlanted = array_sum(array_column($data, 'numSeedlings'));
-$uniqueMunicipalities = count(array_unique(array_column($data, 'municipality')));
-$uniqueBarangays = count(array_unique(array_column($data, 'barangay')));
-$uniqueVarieties = count(array_unique(array_column($data, 'variety')));
+$totalPlanted = 0;
+$municipalities = [];
+$barangays = [];
+$varieties = [];
+$years = [];
 
-// Get unique values for filters
-$municipalities = array_unique(array_column($data, 'municipality'));
-$barangays = array_unique(array_column($data, 'barangay'));
-$varieties = array_unique(array_column($data, 'variety'));
+foreach ($data as $record) {
+    $numSeedlings = (int)($record['numSeedlings'] ?? 0);
+    $totalPlanted += $numSeedlings;
+    
+    if (!empty($record['municipality'])) {
+        $municipalities[] = $record['municipality'];
+    }
+    if (!empty($record['barangay'])) {
+        $barangays[] = $record['barangay'];
+    }
+    if (!empty($record['variety'])) {
+        $varieties[] = $record['variety'];
+    }
+    
+    if (!empty($record['date'])) {
+        $timestamp = strtotime($record['date']);
+        if ($timestamp !== false) {
+            $years[] = date('Y', $timestamp);
+        }
+    }
+}
+
+$uniqueMunicipalities = count(array_unique($municipalities));
+$uniqueBarangays = count(array_unique($barangays));
+$uniqueVarieties = count(array_unique($varieties));
+
+$municipalities = array_unique($municipalities);
+$barangays = array_unique($barangays);
+$varieties = array_unique($varieties);
+$years = array_unique($years);
 sort($municipalities);
 sort($barangays);
 sort($varieties);
+sort($years);
 
-// Calculate monthly totals for chart
-$monthlyData = [];
-foreach ($data as $record) {
-    if (isset($record['date']) && isset($record['numSeedlings'])) {
-        $month = date('Y-m', strtotime($record['date']));
-        if (!isset($monthlyData[$month])) {
-            $monthlyData[$month] = 0;
-        }
-        $monthlyData[$month] += (int)$record['numSeedlings'];
-    }
+// If no years found, add current year
+if (empty($years)) {
+    $years[] = date('Y');
 }
-ksort($monthlyData);
-$months = array_keys($monthlyData);
-$monthlyTotals = array_values($monthlyData);
+
+// Month names
+$monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+               'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Prepare data for charts
+$chartData = [
+    'allData' => $data,
+    'years' => $years
+];
 ?>
 
 <!DOCTYPE html>
@@ -367,6 +398,7 @@ body {
     font-weight: 500;
     transition: all 0.3s ease;
     white-space: nowrap;
+    cursor: pointer;
 }
 
 .btn-filter-reset:hover {
@@ -385,6 +417,7 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    cursor: pointer;
 }
 
 .btn-print-report:hover {
@@ -408,12 +441,18 @@ body {
     display: block;
 }
 
-/* ===== CHART CARD ===== */
+/* ===== CHART CARDS ===== */
+.charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
 .chart-card {
     background: white;
     border-radius: 15px;
     padding: 20px;
-    margin-bottom: 30px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
@@ -432,8 +471,23 @@ body {
 }
 
 .chart-container {
-    height: 300px;
+    height: 350px;
     position: relative;
+}
+
+.year-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.year-selector select {
+    padding: 5px 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
 }
 
 /* ===== TABLE CARD ===== */
@@ -442,6 +496,7 @@ body {
     border-radius: 15px;
     padding: 25px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
 }
 
 .table-header {
@@ -573,7 +628,7 @@ body {
     
     .sidebar,
     .stats-grid,
-    .chart-card,
+    .charts-grid,
     .filter-section,
     .page-header,
     .dataTables_length,
@@ -658,6 +713,10 @@ body {
     
     .filter-group {
         min-width: 100%;
+    }
+    
+    .charts-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -874,18 +933,72 @@ body {
         </div>
     </div>
 
-    <!-- Chart Card -->
-    <?php if (!empty($months)): ?>
-    <div class="chart-card">
-        <h3>
-            <i class="fas fa-chart-line"></i>
-            Monthly Planting Trend
-        </h3>
-        <div class="chart-container">
-            <canvas id="plantingChart"></canvas>
+    <!-- Charts Grid -->
+    <div class="charts-grid">
+        <!-- Top 5 Areas Chart -->
+        <div class="chart-card">
+            <h3 style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+                <span>
+                    <i class="fas fa-chart-bar"></i>
+                    Top 5 Areas with Highest Planting
+                </span>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <!-- YEAR FILTER -->
+                    <select id="topYearSelect" onchange="initTopAreasChart()" class="form-select form-select-sm">
+                        <option value="">All Years</option>
+                        <?php foreach ($years as $year): ?>
+                            <option value="<?= $year ?>"><?= $year ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <!-- MONTH FILTER -->
+                    <select id="topMonthSelect" onchange="initTopAreasChart()" class="form-select form-select-sm">
+                        <option value="">All Months</option>
+                        <option value="0">January</option>
+                        <option value="1">February</option>
+                        <option value="2">March</option>
+                        <option value="3">April</option>
+                        <option value="4">May</option>
+                        <option value="5">June</option>
+                        <option value="6">July</option>
+                        <option value="7">August</option>
+                        <option value="8">September</option>
+                        <option value="9">October</option>
+                        <option value="10">November</option>
+                        <option value="11">December</option>
+                    </select>
+                </div>
+            </h3>
+            <div class="chart-container">
+                <canvas id="topAreasChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Monthly Trend Chart -->
+        <div class="chart-card">
+            <h3 style="display: flex; justify-content: space-between; align-items: center;">
+                <span>
+                    <i class="fas fa-chart-line"></i>
+                    Monthly Planting Trend
+                </span>
+                <div class="year-selector">
+                    <label for="yearSelect" style="font-size: 14px; color: #4a5568; margin: 0;">
+                        <i class="fas fa-calendar-alt"></i> Year:
+                    </label>
+                    <select id="yearSelect" onchange="updateMonthlyChart()">
+                        <option value="">All Years</option>
+                        <?php foreach ($years as $year): ?>
+                            <option value="<?= $year ?>" <?= $year == date('Y') ? 'selected' : '' ?>>
+                                <?= $year ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </h3>
+            <div class="chart-container">
+                <canvas id="monthlyTrendChart"></canvas>
+            </div>
         </div>
     </div>
-    <?php endif; ?>
 
     <!-- Table Card -->
     <div class="table-card">
@@ -952,6 +1065,17 @@ body {
 <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
 
 <script>
+// Pass PHP data to JavaScript
+var allData = <?php echo json_encode($data); ?>;
+
+// Chart instances
+var topAreasChart;
+var monthlyTrendChart;
+
+// Month names
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+
 $(document).ready(function() {
     // Initialize DataTable
     var table = $('#plantingTable').DataTable({
@@ -973,7 +1097,7 @@ $(document).ready(function() {
         order: [[0, 'desc']]
     });
 
-    // ===== CUSTOM FILTER FUNCTIONALITY =====
+    // Custom filter for Municipality, Barangay, and Variety
     $.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
         var selectedMun = $('#filterMunicipality').val();
         var selectedBgy = $('#filterBarangay').val();
@@ -983,17 +1107,14 @@ $(document).ready(function() {
         var rowBgy = data[2]; // Barangay column (index 2)
         var rowVariety = data[3]; // Variety column (index 3)
         
-        // Check Municipality filter
         if (selectedMun && rowMun !== selectedMun) {
             return false;
         }
         
-        // Check Barangay filter
         if (selectedBgy && rowBgy !== selectedBgy) {
             return false;
         }
         
-        // Check Variety filter
         if (selectedVariety && rowVariety !== selectedVariety) {
             return false;
         }
@@ -1001,14 +1122,19 @@ $(document).ready(function() {
         return true;
     });
     
-    // When any filter changes, redraw the table
+    // When any filter changes, redraw the table and update charts
     $('#filterMunicipality, #filterBarangay, #filterVariety').on('change', function() {
         table.draw();
         updateFilterInfo(table);
+        updateCharts();
     });
     
     // Initial info update
     updateFilterInfo(table);
+    
+    // Initialize charts
+    initTopAreasChart();
+    updateMonthlyChart();
 });
 
 // Update filter info message
@@ -1042,24 +1168,279 @@ function resetFilters() {
     $('#filterVariety').val('');
     $('#plantingTable').DataTable().draw();
     updateFilterInfo($('#plantingTable').DataTable());
+    updateCharts();
+}
+
+// Get filtered data for charts
+function getFilteredData() {
+    var selectedMun = $('#filterMunicipality').val();
+    var selectedBgy = $('#filterBarangay').val();
+    var selectedVariety = $('#filterVariety').val();
+    
+    return allData.filter(function(record) {
+        if (selectedMun && record.municipality !== selectedMun) return false;
+        if (selectedBgy && record.barangay !== selectedBgy) return false;
+        if (selectedVariety && record.variety !== selectedVariety) return false;
+        return true;
+    });
+}
+
+// Initialize Top 5 Areas Chart
+function initTopAreasChart() {
+    var filteredData = getFilteredData();
+    var selectedYear = $('#topYearSelect').val();
+    var selectedMonth = $('#topMonthSelect').val();
+
+    // Filter data by year and month
+    filteredData = filteredData.filter(function(record) {
+        if (!record.date) return false;
+
+        var dateStr = record.date;
+        var parts;
+        var year, month;
+
+        // YYYY-MM-DD
+        if (dateStr.includes('-')) {
+            parts = dateStr.split('-');
+            if (parts[0].length === 4) {
+                year = parseInt(parts[0]);
+                month = parseInt(parts[1]) - 1;
+            } else {
+                year = parseInt(parts[2]);
+                month = parseInt(parts[1]) - 1;
+            }
+        }
+        // MM/DD/YYYY
+        else if (dateStr.includes('/')) {
+            parts = dateStr.split('/');
+            year = parseInt(parts[2]);
+            month = parseInt(parts[0]) - 1;
+        }
+
+        if (isNaN(year) || isNaN(month)) return false;
+
+        // Filter year
+        if (selectedYear && year.toString() !== selectedYear) {
+            return false;
+        }
+
+        // Filter month
+        if (selectedMonth !== "" && month.toString() !== selectedMonth) {
+            return false;
+        }
+
+        return true;
+    });
+
+    // Aggregate by area
+    var areaPlanted = {};
+    filteredData.forEach(function(record) {
+        var area = (record.municipality || 'Unknown') + ' - ' + (record.barangay || 'Unknown');
+        var planted = parseInt(record.numSeedlings) || 0;
+        areaPlanted[area] = (areaPlanted[area] || 0) + planted;
+    });
+
+    // Sort top 5
+    var sortedAreas = Object.entries(areaPlanted)
+        .sort(function(a, b) { return b[1] - a[1]; })
+        .slice(0, 5);
+
+    var labels = sortedAreas.map(function(item) { return item[0]; });
+    var values = sortedAreas.map(function(item) { return item[1]; });
+
+    if (labels.length === 0) {
+        labels = ['No data'];
+        values = [0];
+    }
+
+    var ctx = document.getElementById('topAreasChart').getContext('2d');
+
+    if (topAreasChart) {
+        topAreasChart.destroy();
+    }
+
+    topAreasChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Total Planted',
+                data: values,
+                backgroundColor: [
+                    'rgba(72, 187, 120, 0.8)',
+                    'rgba(66, 153, 225, 0.8)',
+                    'rgba(159, 122, 234, 0.8)',
+                    'rgba(237, 137, 54, 0.8)',
+                    'rgba(236, 201, 75, 0.8)'
+                ],
+                borderWidth: 2,
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
+// Update Monthly Trend Chart
+function updateMonthlyChart() {
+    var selectedYear = $('#yearSelect').val();
+    var filteredData = getFilteredData();
+    
+    // Initialize monthly data
+    var monthlyData = {};
+    monthNames.forEach(function(month, index) {
+        monthlyData[index] = 0;
+    });
+    
+    // Aggregate by month
+    filteredData.forEach(function(record) {
+        if (record.date) {
+            var dateStr = record.date;
+            var parts;
+            var year, month;
+
+            if (dateStr.includes('-')) {
+                parts = dateStr.split('-');
+                if (parts[0].length === 4) {
+                    year = parseInt(parts[0]);
+                    month = parseInt(parts[1]) - 1;
+                } else {
+                    year = parseInt(parts[2]);
+                    month = parseInt(parts[1]) - 1;
+                }
+            }
+            else if (dateStr.includes('/')) {
+                parts = dateStr.split('/');
+                year = parseInt(parts[2]);
+                month = parseInt(parts[0]) - 1;
+            }
+
+            if (isNaN(year) || isNaN(month)) return;
+            
+            if (!selectedYear || year.toString() === selectedYear) {
+                var numSeedlings = parseInt(record.numSeedlings) || 0;
+                monthlyData[month] += numSeedlings;
+            }
+        }
+    });
+    
+    var ctx = document.getElementById('monthlyTrendChart').getContext('2d');
+    
+    if (monthlyTrendChart) {
+        monthlyTrendChart.destroy();
+    }
+    
+    var hasData = Object.values(monthlyData).some(function(value) { return value > 0; });
+    
+    monthlyTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: monthNames,
+            datasets: [{
+                label: selectedYear ? 'Planted in ' + selectedYear : 'Total Planted',
+                data: Object.values(monthlyData),
+                borderColor: '#38a169',
+                backgroundColor: 'rgba(72, 187, 120, 0.1)',
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#38a169',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 6,
+                pointHoverRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Planted: ' + context.parsed.y.toLocaleString() + ' seedlings';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: '#e2e8f0'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Number of Seedlings Planted',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Month',
+                        font: {
+                            size: 12,
+                            weight: 'bold'
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Update all charts
+function updateCharts() {
+    initTopAreasChart();
+    updateMonthlyChart();
 }
 
 // Print only the filtered data
 function printFilteredData() {
     var table = $('#plantingTable').DataTable();
     
-    // Get filter values for the report header
     var mun = $('#filterMunicipality').val() || 'All Municipalities';
     var bgy = $('#filterBarangay').val() || 'All Barangays';
     var variety = $('#filterVariety').val() || 'All Varieties';
     
-    // Get filtered data from the table
     var filteredData = [];
     var totalPlanted = 0;
     
     table.rows({ filter: 'applied' }).every(function() {
         var row = this.data();
-        // Extract number from the badge HTML
         var plantedText = row[4].replace(/<[^>]*>/g, '').replace(/,/g, '');
         var planted = parseInt(plantedText) || 0;
         totalPlanted += planted;
@@ -1073,7 +1454,6 @@ function printFilteredData() {
         });
     });
     
-    // Create print window
     var printWindow = window.open('', '_blank', 'width=1200,height=800');
     
     printWindow.document.write(`
@@ -1240,60 +1620,6 @@ function printFilteredData() {
     
     printWindow.document.close();
 }
-
-// Chart initialization
-<?php if (!empty($months)): ?>
-const ctx = document.getElementById('plantingChart').getContext('2d');
-new Chart(ctx, {
-    type: 'line',
-    data: {
-        labels: <?php echo json_encode($months); ?>,
-        datasets: [{
-            label: 'Seedlings Planted',
-            data: <?php echo json_encode($monthlyTotals); ?>,
-            backgroundColor: 'rgba(72, 187, 120, 0.1)',
-            borderColor: '#48bb78',
-            borderWidth: 3,
-            pointBackgroundColor: '#48bb78',
-            pointBorderColor: 'white',
-            pointBorderWidth: 2,
-            pointRadius: 5,
-            pointHoverRadius: 7,
-            tension: 0.4,
-            fill: true
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: {
-                display: false
-            },
-            tooltip: {
-                backgroundColor: '#2d3748',
-                titleColor: '#fff',
-                bodyColor: '#e2e8f0',
-                padding: 12,
-                cornerRadius: 8
-            }
-        },
-        scales: {
-            y: {
-                beginAtZero: true,
-                grid: {
-                    color: '#e2e8f0'
-                },
-                ticks: {
-                    callback: function(value) {
-                        return value.toLocaleString();
-                    }
-                }
-            }
-        }
-    }
-});
-<?php endif; ?>
 
 // Loading animation
 $(window).on('load', function() {
