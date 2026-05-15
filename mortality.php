@@ -10,7 +10,7 @@ if (!isset($_SESSION['loggedin']) || $_SESSION['loggedin'] !== true) {
 /* ===== FIREBASE FETCH ===== */
 $firebase_url = "https://validator-b9503-default-rtdb.firebaseio.com/SeedlingMortalityReports.json";
 $response = @file_get_contents($firebase_url);
-$data = json_decode($response, true) ?? [];
+$data = array_values(json_decode($response, true) ?? []);
 
 /* ===== CALCULATE STATISTICS ===== */
 $totalMortality = array_sum(array_column($data, 'died'));
@@ -907,10 +907,43 @@ body {
     <div class="charts-grid">
         <!-- Top 5 Areas Chart -->
         <div class="chart-card">
-            <h3>
-                <i class="fas fa-chart-bar"></i>
-                Top 5 Areas with Highest Mortality
-            </h3>
+           <h3 style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+    <span>
+        <i class="fas fa-chart-bar"></i>
+        Top 5 Areas with Highest Mortality
+    </span>
+
+    <div style="display:flex; gap:10px; align-items:center;">
+        
+        <!-- YEAR FILTER -->
+        <select id="topYearSelect" onchange="initTopAreasChart()" class="form-select form-select-sm">
+            <option value="">All Years</option>
+            <?php foreach ($years as $year): ?>
+                <option value="<?= $year ?>">
+                    <?= $year ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+
+        <!-- MONTH FILTER -->
+        <select id="topMonthSelect" onchange="initTopAreasChart()" class="form-select form-select-sm">
+            <option value="">All Months</option>
+            <option value="0">January</option>
+            <option value="1">February</option>
+            <option value="2">March</option>
+            <option value="3">April</option>
+            <option value="4">May</option>
+            <option value="5">June</option>
+            <option value="6">July</option>
+            <option value="7">August</option>
+            <option value="8">September</option>
+            <option value="9">October</option>
+            <option value="10">November</option>
+            <option value="11">December</option>
+        </select>
+
+    </div>
+</h3>
             <div class="chart-container">
                 <canvas id="topAreasChart"></canvas>
             </div>
@@ -1130,37 +1163,101 @@ function getFilteredData() {
 
 // Initialize Top 5 Areas Chart
 function initTopAreasChart() {
+
     var filteredData = getFilteredData();
-    
-    // Aggregate mortality by area (municipality - barangay)
-    var areaMortality = {};
-    filteredData.forEach(function(record) {
-        var area = (record.municipality || 'Unknown') + ' - ' + (record.barangay || 'Unknown');
-        var died = parseInt(record.died) || 0;
-        areaMortality[area] = (areaMortality[area] || 0) + died;
+
+    var selectedYear = $('#topYearSelect').val();
+    var selectedMonth = $('#topMonthSelect').val();
+
+    // FILTER DATA BY YEAR AND MONTH
+    filteredData = filteredData.filter(function(record) {
+
+        if (!record.date) return false;
+
+        var dateStr = record.date;
+        var parts;
+        var year, month;
+
+        // YYYY-MM-DD
+        if (dateStr.includes('-')) {
+
+            parts = dateStr.split('-');
+
+            if (parts[0].length === 4) {
+                year = parseInt(parts[0]);
+                month = parseInt(parts[1]) - 1;
+            } else {
+                year = parseInt(parts[2]);
+                month = parseInt(parts[1]) - 1;
+            }
+
+        }
+        // MM/DD/YYYY
+        else if (dateStr.includes('/')) {
+
+            parts = dateStr.split('/');
+
+            year = parseInt(parts[2]);
+            month = parseInt(parts[0]) - 1;
+        }
+
+        if (isNaN(year) || isNaN(month)) return false;
+
+        // FILTER YEAR
+        if (selectedYear && year.toString() !== selectedYear) {
+            return false;
+        }
+
+        // FILTER MONTH
+        if (selectedMonth !== "" && month.toString() !== selectedMonth) {
+            return false;
+        }
+
+        return true;
     });
-    
-    // Sort and get top 5
+
+    // AGGREGATE BY AREA
+    var areaMortality = {};
+
+    filteredData.forEach(function(record) {
+
+        var area =
+            (record.municipality || 'Unknown') +
+            ' - ' +
+            (record.barangay || 'Unknown');
+
+        var died = parseInt(record.died) || 0;
+
+        areaMortality[area] =
+            (areaMortality[area] || 0) + died;
+    });
+
+    // SORT TOP 5
     var sortedAreas = Object.entries(areaMortality)
-        .sort(function(a, b) { return b[1] - a[1]; })
+        .sort(function(a, b) {
+            return b[1] - a[1];
+        })
         .slice(0, 5);
-    
-    var labels = sortedAreas.map(function(item) { return item[0]; });
-    var values = sortedAreas.map(function(item) { return item[1]; });
-    
-    // If no data, show placeholder
+
+    var labels = sortedAreas.map(function(item) {
+        return item[0];
+    });
+
+    var values = sortedAreas.map(function(item) {
+        return item[1];
+    });
+
     if (labels.length === 0) {
-        labels = ['No data available'];
+        labels = ['No data'];
         values = [0];
     }
-    
+
     var ctx = document.getElementById('topAreasChart').getContext('2d');
-    
-    // Destroy existing chart if it exists
+
     if (topAreasChart) {
         topAreasChart.destroy();
     }
-    
+
     topAreasChart = new Chart(ctx, {
         type: 'bar',
         data: {
@@ -1175,13 +1272,6 @@ function initTopAreasChart() {
                     'rgba(159, 122, 234, 0.8)',
                     'rgba(72, 187, 120, 0.8)'
                 ],
-                borderColor: [
-                    '#e53e3e',
-                    '#dd6b20',
-                    '#d69e2e',
-                    '#805ad5',
-                    '#38a169'
-                ],
                 borderWidth: 2,
                 borderRadius: 8
             }]
@@ -1192,39 +1282,11 @@ function initTopAreasChart() {
             plugins: {
                 legend: {
                     display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Mortality: ' + context.parsed.y.toLocaleString() + ' seedlings';
-                        }
-                    }
                 }
             },
             scales: {
                 y: {
-                    beginAtZero: true,
-                    grid: {
-                        color: '#e2e8f0'
-                    },
-                    ticks: {
-                        callback: function(value) {
-                            return value.toLocaleString();
-                        }
-                    },
-                    title: {
-                        display: true,
-                        text: 'Number of Dead Seedlings',
-                        font: {
-                            size: 12,
-                            weight: 'bold'
-                        }
-                    }
-                },
-                x: {
-                    grid: {
-                        display: false
-                    }
+                    beginAtZero: true
                 }
             }
         }
@@ -1245,9 +1307,40 @@ function updateMonthlyChart() {
     // Aggregate mortality by month
     filteredData.forEach(function(record) {
         if (record.date) {
-            var date = new Date(record.date);
-            var year = date.getFullYear();
-            var month = date.getMonth(); // 0-11
+            // Parse date safely
+var dateStr = record.date;
+
+// Skip if empty
+if (!dateStr) return;
+
+// Convert date properly
+var parts;
+var year, month;
+
+// If format is YYYY-MM-DD
+if (dateStr.includes('-')) {
+    parts = dateStr.split('-');
+    
+    if (parts[0].length === 4) {
+        // YYYY-MM-DD
+        year = parseInt(parts[0]);
+        month = parseInt(parts[1]) - 1;
+    } else {
+        // DD-MM-YYYY
+        year = parseInt(parts[2]);
+        month = parseInt(parts[1]) - 1;
+    }
+}
+
+// If format is MM/DD/YYYY
+else if (dateStr.includes('/')) {
+    parts = dateStr.split('/');
+    year = parseInt(parts[2]);
+    month = parseInt(parts[0]) - 1;
+}
+
+// Skip invalid dates
+if (isNaN(year) || isNaN(month)) return;
             
             // Filter by selected year
             if (!selectedYear || year.toString() === selectedYear) {
